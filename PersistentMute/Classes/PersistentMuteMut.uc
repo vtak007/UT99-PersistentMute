@@ -9,14 +9,16 @@
 //   - Silent mute: blocked messages produce a private notice to sender only
 //   - Admin commands via: mutate PM <command>
 //
-// Admin commands — type in chat (requires bAdmin=true):
-//   !pm mute <name> forever
-//   !pm mute <name> until YYYY-MM-DD
-//   !pm mute <name> games N
-//   !pm mute-hwid <HWID> forever|until YYYY-MM-DD|games N
-//   !pm unmute <name>
-//   !pm unmute-hwid <HWID>
+// Admin commands — type in chat (requires Nexgen R_Moderate right):
+//   !pm mute <name> forever|until YYYY-MM-DD|games N [reason...]
+//   !pm mute <name> <HWID> <duration> [reason...]   (offline, name recorded)
+//   !pm mute <HWID> <duration> [reason...]          (offline)
+//   !pm unmute <name> | <HWID> | <name> <HWID>
+//   !pm id <name>       (show HWID + mute status; checks last-seen cache)
 //   !pm list
+//   !pm mute-hwid / !pm unmute-hwid                  (legacy aliases, still work)
+// Offline mute/unmute BY NAME uses the last-seen cache (Store.Seen) — a HWID is
+// recognised anywhere by shape (32 hex chars), so plain names never collide.
 // Note: Nexgen intercepts the Mutate chain so mutate PM commands are unreliable.
 // =============================================================================
 class PersistentMuteMut extends Mutator;
@@ -187,6 +189,8 @@ function Timer()
             {
                 Tracked[i].HWID       = H;
                 Tracked[i].bConfirmed = true;
+                Store.TouchSeen(H,
+                    Tracked[i].Pawn.PlayerReplicationInfo.PlayerName, TodayStr());
                 ApplyMuteCheck(i);
             }
         }
@@ -200,7 +204,12 @@ function ApplyMuteCheck(int Idx)
     Tracked[Idx].bMuted = (Status > 0);
 
     if (Tracked[Idx].bMuted)
+    {
+        // Track name changes on the mute record so !pm list stays informative
+        Store.AddAlias(Tracked[Idx].HWID,
+            Tracked[Idx].Pawn.PlayerReplicationInfo.PlayerName);
         Tracked[Idx].Pawn.ClientMessage(MuteNotice(Tracked[Idx].HWID));
+    }
 }
 
 // Duration-specific notice shown to a muted player — built from the stored
@@ -208,8 +217,9 @@ function ApplyMuteCheck(int Idx)
 function string MuteNotice(string HWID)
 {
     local int i;
-    local string Rec;
+    local string Rec, Msg;
 
+    Msg = "You are muted on this server forever";
     for (i = 0; i < Store.Records.Length; i++)
     {
         Rec = Store.Records[i];
@@ -217,13 +227,15 @@ function string MuteNotice(string HWID)
         {
             switch (int(Store.GetField(Rec, 2)))
             {
-                case 1: return "You are muted on this server until "$Store.GetField(Rec, 3)$".";
-                case 2: return "You are muted on this server for "$Store.GetField(Rec, 3)$" games";
+                case 1: Msg = "You are muted on this server until "$Store.GetField(Rec, 3); break;
+                case 2: Msg = "You are muted on this server for "$Store.GetField(Rec, 3)$" games"; break;
             }
-            return "You are muted on this server forever";
+            if (Store.GetField(Rec, 6) != "")
+                Msg = Msg$". Reason: "$Store.GetField(Rec, 6);
+            break;
         }
     }
-    return "You are muted on this server forever";
+    return Msg;
 }
 
 // =============================================================================
@@ -309,68 +321,118 @@ function Mutate(string Str, PlayerPawn Sender)
 
 function ProcessCommand(string Sub, PlayerPawn Admin)
 {
-    local string Cmd, A1, A2, A3;
+    local string Cmd, A1, A2;
 
     Cmd = Caps(GetWord(Sub, 0));
     A1  = GetWord(Sub, 1);
-    A2  = Caps(GetWord(Sub, 2));
-    A3  = GetWord(Sub, 3);
+    A2  = GetWord(Sub, 2);
 
     switch (Cmd)
     {
-        case "MUTE":        CmdMuteByName(Admin, A1, A2, A3);  break;
-        case "MUTE-HWID":   CmdMuteByHWID(Admin, A1, A2, A3);  break;
-        case "UNMUTE":      CmdUnmuteByName(Admin, A1);         break;
-        case "UNMUTE-HWID": CmdUnmuteByHWID(Admin, A1);         break;
-        case "LIST":        CmdList(Admin);                      break;
+        case "MUTE":
+            if (LooksLikeHWID(A1))
+                CmdMuteOffline(Admin, "", A1, Caps(A2), GetWord(Sub, 3), MuteReason(Sub, 2));
+            else if (LooksLikeHWID(A2))
+                CmdMuteOffline(Admin, A1, A2, Caps(GetWord(Sub, 3)), GetWord(Sub, 4), MuteReason(Sub, 3));
+            else
+                CmdMuteByName(Admin, A1, Caps(A2), GetWord(Sub, 3), MuteReason(Sub, 2));
+            break;
+
+        case "MUTE-HWID":
+            CmdMuteOffline(Admin, "", A1, Caps(A2), GetWord(Sub, 3), MuteReason(Sub, 2));
+            break;
+
+        case "UNMUTE":
+            if (LooksLikeHWID(A1))
+                CmdUnmuteByHWID(Admin, A1);
+            else if (LooksLikeHWID(A2))
+                CmdUnmuteByHWID(Admin, A2);
+            else
+                CmdUnmuteByName(Admin, A1);
+            break;
+
+        case "UNMUTE-HWID": CmdUnmuteByHWID(Admin, A1);          break;
+        case "ID":          CmdID(Admin, A1);                     break;
+        case "LIST":        CmdList(Admin);                       break;
         default:
             Admin.ClientMessage("[PM] Commands (type in chat):");
-            Admin.ClientMessage("  !pm mute <name> forever | until YYYY-MM-DD | games N");
-            Admin.ClientMessage("  !pm mute-hwid <HWID> forever | until YYYY-MM-DD | games N");
-            Admin.ClientMessage("  !pm unmute <name>  |  !pm unmute-hwid <HWID>  |  !pm list");
+            Admin.ClientMessage("  !pm mute <name|HWID|name HWID> forever | until YYYY-MM-DD | games N [reason]");
+            Admin.ClientMessage("  !pm unmute <name|HWID>  |  !pm id <name>  |  !pm list");
+            Admin.ClientMessage("  Offline players: use their HWID, or their name if seen recently.");
     }
 }
 
-// ---- mute by in-game name ----
+// Optional reason = everything after the duration words. DurWordIdx is the
+// index of the duration-type word ("forever"/"until"/"games") within Sub.
+function string MuteReason(string Sub, int DurWordIdx)
+{
+    if (Caps(GetWord(Sub, DurWordIdx)) == "FOREVER")
+        return GetRest(Sub, DurWordIdx + 1);
+    return GetRest(Sub, DurWordIdx + 2);   // until/games carry a value word
+}
 
-function CmdMuteByName(PlayerPawn Admin, string Name, string DurType, string DurVal)
+// ---- mute by in-game name (online, or offline via the last-seen cache) ----
+
+function CmdMuteByName(PlayerPawn Admin, string Name, string DurType,
+                       string DurVal, string Reason)
 {
     local PlayerPawn Target;
-    local string HWID;
+    local string HWID, SeenRec;
 
     Target = FindByName(Name);
-    if (Target == None)
+    if (Target != None)
     {
-        Admin.ClientMessage("[PM] Player not found: "$Name);
+        HWID = HWIDFor(Target);
+        if (HWID == "")
+        {
+            Admin.ClientMessage("[PM] HWID not yet available for "$Name$". Retry in a few seconds.");
+            return;
+        }
+        DoMute(Admin, HWID, Target.PlayerReplicationInfo.PlayerName,
+               DurType, DurVal, Target, Reason);
         return;
     }
 
-    HWID = HWIDFor(Target);
-    if (HWID == "")
+    // Not online — most recent matching name in the last-seen cache
+    SeenRec = Store.SeenLookup(Name);
+    if (SeenRec == "")
     {
-        Admin.ClientMessage("[PM] HWID not yet available for "$Name$". Retry in a few seconds.");
+        Admin.ClientMessage("[PM] Player not found online or in the last-seen cache: "$Name);
         return;
     }
-
-    DoMute(Admin, HWID, Target.PlayerReplicationInfo.PlayerName, DurType, DurVal, Target);
+    Admin.ClientMessage("[PM] Offline mute via last-seen cache (last seen "
+        $Store.GetField(SeenRec, 2)$").");
+    DoMute(Admin, Store.GetField(SeenRec, 0), Store.GetField(SeenRec, 1),
+           DurType, DurVal, None, Reason);
 }
 
-// ---- mute by raw HWID (works for offline players) ----
+// ---- mute by raw HWID (works for offline players; name optional) ----
 
-function CmdMuteByHWID(PlayerPawn Admin, string HWID, string DurType, string DurVal)
+function CmdMuteOffline(PlayerPawn Admin, string PlayerName, string HWID,
+                        string DurType, string DurVal, string Reason)
 {
     local PlayerPawn Online;
+
     Online = FindByHWID(HWID);
-    DoMute(Admin, HWID, "Unknown", DurType, DurVal, Online);
+    if (PlayerName == "" && Online != None)
+        PlayerName = Online.PlayerReplicationInfo.PlayerName;
+    if (PlayerName == "")
+        PlayerName = "Unknown";
+
+    DoMute(Admin, HWID, PlayerName, DurType, DurVal, Online, Reason);
 }
 
 // ---- shared mute execution ----
 
 function DoMute(PlayerPawn Admin, string HWID, string PlayerName,
-                string DurType, string DurVal, PlayerPawn Target)
+                string DurType, string DurVal, PlayerPawn Target, string Reason)
 {
     local int MType;
     local string ExpVal;
+
+    // Pipe is the record delimiter — never allow it inside the reason text
+    while (InStr(Reason, "|") >= 0)
+        Reason = Left(Reason, InStr(Reason, "|"))$"/"$Mid(Reason, InStr(Reason, "|") + 1);
 
     switch (DurType)
     {
@@ -405,7 +467,7 @@ function DoMute(PlayerPawn Admin, string HWID, string PlayerName,
     }
 
     Store.SetMute(HWID, PlayerName, MType, ExpVal,
-                  Admin.PlayerReplicationInfo.PlayerName, TodayStr());
+                  Admin.PlayerReplicationInfo.PlayerName, TodayStr(), Reason);
 
     // Update live session state if player is currently online
     if (Target != None)
@@ -414,30 +476,47 @@ function DoMute(PlayerPawn Admin, string HWID, string PlayerName,
         Target.ClientMessage(MuteNotice(HWID));
     }
 
-    Admin.ClientMessage("[PM] Muted: "$PlayerName$" | HWID: "$HWID$" | "$DurType$" "$DurVal);
+    if (Reason != "")
+        Admin.ClientMessage("[PM] Muted: "$PlayerName$" | HWID: "$HWID$" | "$DurType$" "$DurVal$" | Reason: "$Reason);
+    else
+        Admin.ClientMessage("[PM] Muted: "$PlayerName$" | HWID: "$HWID$" | "$DurType$" "$DurVal);
 }
 
-// ---- unmute by name ----
+// ---- unmute by name (online, or offline via the last-seen cache) ----
 
 function CmdUnmuteByName(PlayerPawn Admin, string Name)
 {
     local PlayerPawn Target;
-    local string HWID;
+    local string HWID, SeenRec;
 
     Target = FindByName(Name);
-    if (Target == None) { Admin.ClientMessage("[PM] Player not found: "$Name); return; }
-
-    HWID = HWIDFor(Target);
-    if (HWID == "") { Admin.ClientMessage("[PM] HWID not available for "$Name); return; }
-
-    if (Store.Unmute(HWID))
+    if (Target != None)
     {
-        SetMuteState(Target, false);
-        Target.ClientMessage("[PersistentMute] Your mute has been lifted.");
-        Admin.ClientMessage("[PM] Unmuted: "$Target.PlayerReplicationInfo.PlayerName);
+        HWID = HWIDFor(Target);
+        if (HWID == "") { Admin.ClientMessage("[PM] HWID not available for "$Name); return; }
+
+        if (Store.Unmute(HWID))
+        {
+            SetMuteState(Target, false);
+            Target.ClientMessage("[PersistentMute] Your mute has been lifted.");
+            Admin.ClientMessage("[PM] Unmuted: "$Target.PlayerReplicationInfo.PlayerName);
+        }
+        else
+            Admin.ClientMessage("[PM] "$Name$" is not in the mute list.");
+        return;
     }
+
+    // Not online — most recent matching name in the last-seen cache
+    SeenRec = Store.SeenLookup(Name);
+    if (SeenRec == "")
+    {
+        Admin.ClientMessage("[PM] Player not found online or in the last-seen cache: "$Name);
+        return;
+    }
+    if (Store.Unmute(Store.GetField(SeenRec, 0)))
+        Admin.ClientMessage("[PM] Unmuted (offline): "$Store.GetField(SeenRec, 1));
     else
-        Admin.ClientMessage("[PM] "$Name$" is not in the mute list.");
+        Admin.ClientMessage("[PM] "$Store.GetField(SeenRec, 1)$" is not in the mute list.");
 }
 
 // ---- unmute by raw HWID ----
@@ -460,12 +539,59 @@ function CmdUnmuteByHWID(PlayerPawn Admin, string HWID)
         Admin.ClientMessage("[PM] HWID not found in mute list: "$HWID);
 }
 
+// ---- show a player's HWID + mute status (online or from the seen cache) ----
+
+function CmdID(PlayerPawn Admin, string Name)
+{
+    local PlayerPawn Target;
+    local string HWID, SeenRec;
+
+    if (Name == "")
+    {
+        Admin.ClientMessage("[PM] Usage: !pm id <name>");
+        return;
+    }
+
+    Target = FindByName(Name);
+    if (Target != None)
+    {
+        HWID = HWIDFor(Target);
+        if (HWID == "")
+        {
+            Admin.ClientMessage("[PM] "$Target.PlayerReplicationInfo.PlayerName
+                $": HWID not yet available (ACE still validating).");
+            return;
+        }
+        Admin.ClientMessage("[PM] "$Target.PlayerReplicationInfo.PlayerName
+            $" | HWID: "$HWID$" | "$MuteStatusStr(HWID));
+        return;
+    }
+
+    SeenRec = Store.SeenLookup(Name);
+    if (SeenRec == "")
+    {
+        Admin.ClientMessage("[PM] Player not found online or in the last-seen cache: "$Name);
+        return;
+    }
+    Admin.ClientMessage("[PM] "$Store.GetField(SeenRec, 1)
+        $" (offline, last seen "$Store.GetField(SeenRec, 2)$")"
+        $" | HWID: "$Store.GetField(SeenRec, 0)
+        $" | "$MuteStatusStr(Store.GetField(SeenRec, 0)));
+}
+
+function string MuteStatusStr(string HWID)
+{
+    if (Store.GetMuteStatus(HWID, TodayStr()) > 0)
+        return "MUTED";
+    return "not muted";
+}
+
 // ---- list all active mutes ----
 
 function CmdList(PlayerPawn Admin)
 {
     local int i;
-    local string Rec, TypeStr;
+    local string Rec, TypeStr, Line;
 
     if (Store.Records.Length == 0)
     {
@@ -484,12 +610,14 @@ function CmdList(PlayerPawn Admin)
             case 2: TypeStr = Store.GetField(Rec, 3)$" GAMES LEFT";     break;
             default: TypeStr = "UNKNOWN";
         }
-        Admin.ClientMessage(
-            "  ["$Store.GetField(Rec, 1)$"]"$
+        Line = "  ["$Store.GetField(Rec, 1)$"]"$
             " HWID:"$Store.GetField(Rec, 0)$
             " | "$TypeStr$
             " | By:"$Store.GetField(Rec, 4)$
-            " | Added:"$Store.GetField(Rec, 5));
+            " | Added:"$Store.GetField(Rec, 5);
+        if (Store.GetField(Rec, 6) != "")
+            Line = Line$" | Reason: "$Store.GetField(Rec, 6);
+        Admin.ClientMessage(Line);
     }
 }
 
@@ -575,6 +703,37 @@ function string TodayStr()
     else                D = string(Level.Day);
 
     return Level.Year$"-"$M$"-"$D;
+}
+
+// True if S has the shape of an ACE HWID: exactly 32 hex characters.
+// Player names can never collide (a 32-char all-hex name is not realistic).
+function bool LooksLikeHWID(string S)
+{
+    local int i;
+
+    if (Len(S) != 32)
+        return false;
+    for (i = 0; i < 32; i++)
+        if (InStr("0123456789ABCDEF", Caps(Mid(S, i, 1))) < 0)
+            return false;
+    return true;
+}
+
+// Remainder of the string starting at word N (0-indexed) — "" if absent
+function string GetRest(string S, int N)
+{
+    local int i;
+    local string R;
+
+    R = S;
+    for (i = 0; i < N; i++)
+    {
+        while (Left(R, 1) == " ") R = Mid(R, 1);
+        if (InStr(R, " ") < 0) return "";
+        R = Mid(R, InStr(R, " ") + 1);
+    }
+    while (Left(R, 1) == " ") R = Mid(R, 1);
+    return R;
 }
 
 // Extract word N (0-indexed) from a space-delimited string
