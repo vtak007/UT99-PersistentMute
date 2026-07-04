@@ -1,0 +1,4 @@
+# Live server logs contain real player HWIDs and IP addresses — never publish
+server.log
+*.log
+*.tmp.*

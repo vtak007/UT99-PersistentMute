@@ -1,0 +1,42 @@
+# CLAUDE.md
+
+UT99 (v469) server-side mod: HWID-persistent player mutes. See `Readme.md` for
+features, commands, and installation. This file orients future Claude sessions.
+
+## Key Files
+
+| File | Description |
+|---|---|
+| `PersistentMute/Classes/PersistentMuteMut.uc` | Main mutator (ServerActor): player tracking, ACE HWID polling via `IACECheck`, mute application, all `!pm` admin-command logic, lazy-spawns the Nexgen plugin |
+| `PersistentMute/Classes/PersistentMutePlugin.uc` | NexgenPlugin — the ONLY code that sees chat on a Nexgen server; blocks muted senders and routes `!pm` commands (dedupes Nexgen's per-receiver hook calls) |
+| `PersistentMute/Classes/PersistentMuteStore.uc` | Persistence layer: pipe-delimited records in `System\PersistentMute.ini`, auto-expiry of date/game mutes |
+| `PersistentMute/PersistentMute.u` | Latest compiled package (deploy this to the server's `System` dir) |
+| `PersistentMute Development Log.md` | Chronological build/debug history of the project |
+| `Readme.md` | User-facing documentation |
+| `server.log` | Captured live server log from testing — contains real player HWIDs/IPs; gitignored, do not commit |
+
+## Build
+
+Local UT install: `C:\UnrealTournament\`
+
+1. Copy `PersistentMute\Classes\*.uc` from this project to `C:\UnrealTournament\PersistentMute\Classes\` — **always copy before compiling**; a stale install copy silently builds old code.
+2. Delete `C:\UnrealTournament\System\PersistentMute.u` (UCC skips already-built packages).
+3. `cd C:\UnrealTournament\System && UCC.exe make`
+4. Copy the fresh `.u` back to `PersistentMute\` in this project.
+
+`EditPackages` order in the local `UnrealTournament.ini` (~line 480): `IACEv13` and `Nexgen112N` must both appear **above** `PersistentMute`.
+
+## Hard-won constraints (do not rediscover these)
+
+- **Nexgen owns chat.** Standard `MutatorBroadcastMessage` never fires on this server, even as head BaseMutator. Chat interception must be a registered Nexgen plugin. `ModifyPlayer` does reach a normal mutator.
+- **UT99 dynamic arrays never auto-grow** on `Arr[Arr.Length] = X` (that's UT2004+). Use `Arr.Insert(Arr.Length, 1); Arr[Arr.Length-1] = X;` — this bug bit twice (`Tracked`, `Records`).
+- **ACE HWID**: read the per-player `IACEv13.IACECheck` actor (`A.PlayerID == PRI.PlayerID` → `A.HWHash`). ACE validates asynchronously, so the first polls return "" — keep polling. The event-handler (`IACEEventHandler`) approach is a dead end on ACEv13p.
+- **UCC.exe quirks**: no ternary inside `$`-concatenation, no `Class.Package`, no `NotifyEndGame` on Mutator (poll `Level.Game.bGameEnded` from `Timer()`), ASCII-only string literals, `AddMutator` is a `Mutator` member not `GameInfo`.
+- **ServerActor registration**: the mod loads via `ServerActors=` (listed above Nexgen) and splices itself in as head BaseMutator in `PostBeginPlay` (the `?mutator=` list claims BaseMutator before ServerActors run, so prepend, don't append).
+
+## Deployment target
+
+NFOservers-hosted UT99 v469e DM server. `PersistentMute.u` is server-side only —
+never add it to `ServerPackages` or the `?mutator=` line (ServerActors only).
+The live server's `-log=server.log` **overwrites on restart** and is 32KB
+block-buffered; to capture recent lines, play through a map change first.
