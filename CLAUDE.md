@@ -7,9 +7,9 @@ features, commands, and installation. This file orients future Claude sessions.
 
 | File | Description |
 |---|---|
-| `PersistentMute/Classes/PersistentMuteMut.uc` | Main mutator (ServerActor): player tracking, ACE HWID polling via `IACECheck`, mute application, all `!pm` admin-command logic, lazy-spawns the Nexgen plugin |
+| `PersistentMute/Classes/PersistentMuteMut.uc` | Main mutator (ServerActor): player tracking, ACE HWID polling via `IACECheck`, mute application, all `!pm` admin-command logic (incl. offline mute via HWID-shape detection + seen-cache fallback), lazy-spawns the Nexgen plugin |
 | `PersistentMute/Classes/PersistentMutePlugin.uc` | NexgenPlugin — the ONLY code that sees chat on a Nexgen server; blocks muted senders and routes `!pm` commands (dedupes Nexgen's per-receiver hook calls) |
-| `PersistentMute/Classes/PersistentMuteStore.uc` | Persistence layer: pipe-delimited records in `System\PersistentMute.ini`, auto-expiry of date/game mutes |
+| `PersistentMute/Classes/PersistentMuteStore.uc` | Persistence layer: pipe-delimited mute records (7 fields incl. optional reason) + last-seen cache (`Seen=`, cap 200) in `System\PersistentMute.ini`; auto-expiry, alias tracking |
 | `PersistentMute/PersistentMute.u` | Latest compiled package (deploy this to the server's `System` dir) |
 | `PersistentMute Development Log.md` | Chronological build/debug history of the project |
 | `Readme.md` | User-facing documentation |
