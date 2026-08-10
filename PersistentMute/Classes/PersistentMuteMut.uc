@@ -623,11 +623,17 @@ function CmdList(PlayerPawn Admin)
 
 // =============================================================================
 //  ACE HWID query
-//  ACE (v13p) spawns one IACECheck actor per validated player. Find it by
+//  ACE (v14e) spawns one IACECheck actor per validated player. Find it by
 //  PlayerID and read HWHash directly — the same approach NexgenACEExt uses.
-//  Requires EditPackages=IACEv13 (typed class'IACECheck'). Returns "" until ACE
-//  has finished validating the player (its IACECheck appears a few seconds after
-//  connect); Timer() keeps polling until confirmed.
+//  Requires EditPackages=IACEv14 (typed class'IACEv14.IACECheck'). Returns ""
+//  until ACE has finished validating the player (its IACECheck appears a few
+//  seconds after connect); Timer() keeps polling until confirmed.
+//
+//  The package is baked into the compiled .u, so an ACE major-version bump
+//  BREAKS THE WHOLE PACKAGE, not just HWID lookup: if the named IACE package is
+//  absent the server cannot load PersistentMute.u at all and every !pm command
+//  goes dead silently. Retarget this reference (and EditPackages) on any future
+//  ACE upgrade. v13p -> v14e kept IACECheck/PlayerID/HWHash/bWine identical.
 // =============================================================================
 
 function string QueryACEHWID(PlayerPawn PP)
@@ -640,7 +646,7 @@ function string QueryACEHWID(PlayerPawn PP)
 
     PID = PP.PlayerReplicationInfo.PlayerID;
 
-    foreach AllActors(class'IACECheck', A)
+    foreach AllActors(class'IACEv14.IACECheck', A)
     {
         if (A.PlayerID == PID)
         {
