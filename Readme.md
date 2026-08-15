@@ -18,7 +18,12 @@ Built for servers running **Nexgen 112N** and **ACE v1.3p**. No client-side down
 
 ## Admin commands
 
-Type in normal chat (requires the Nexgen **R_Moderate** right, right code "G"):
+Type in normal chat (requires the Nexgen **R_Moderate** right, right code "G").
+
+> **Chat only — not the console.** Press **T** and type the command, or from the
+> console use `say !pm list`. Entering `!pm ...` directly at the console prints
+> *"unrecognized command"* — that message comes from UT's console parser, which has
+> no `!pm` command; the mod is never reached. It is not a sign of a broken install.
 
 | Command | Effect |
 |---|---|
