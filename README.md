@@ -55,7 +55,7 @@ with `. Reason: <reason>` appended when one was given.
 
 - UT99 dedicated server v469 (tested on v469e)
 - **Nexgen 112N** running as a ServerActor (chat interception is done via a Nexgen plugin — plain mutator chat hooks never fire on a Nexgen server)
-- **ACE v1.3p** with the `IACEv13` package (provides the HWID)
+- **ACE v14e** with the `IACEv14` package (provides the HWID)
 
 Note: HWIDs are unavailable for clients running under Wine/Linux (ACE reports `bWine`); those players cannot be HWID-muted.
 
@@ -79,7 +79,7 @@ Compiled with the stock UT99 v469 `UCC.exe`:
 1. Copy the `PersistentMute\Classes\*.uc` sources into `<UT>\PersistentMute\Classes\`.
 2. In `<UT>\System\UnrealTournament.ini`, ensure these lines appear in `[Editor.EditorEngine]`, in this order (both dependency packages must be present in `System`):
    ```ini
-   EditPackages=IACEv13
+   EditPackages=IACEv14
    EditPackages=Nexgen112N
    EditPackages=PersistentMute
    ```

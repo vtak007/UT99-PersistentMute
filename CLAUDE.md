@@ -24,13 +24,13 @@ Local UT install: `C:\UnrealTournament\`
 3. `cd C:\UnrealTournament\System && UCC.exe make`
 4. Copy the fresh `.u` back to `PersistentMute\` in this project.
 
-`EditPackages` order in the local `UnrealTournament.ini` (~line 480): `IACEv13` and `Nexgen112N` must both appear **above** `PersistentMute`.
+`EditPackages` order in the local `UnrealTournament.ini` (~line 480): `IACEv14` and `Nexgen112N` must both appear **above** `PersistentMute`.
 
 ## Hard-won constraints (do not rediscover these)
 
 - **Nexgen owns chat.** Standard `MutatorBroadcastMessage` never fires on this server, even as head BaseMutator. Chat interception must be a registered Nexgen plugin. `ModifyPlayer` does reach a normal mutator.
 - **UT99 dynamic arrays never auto-grow** on `Arr[Arr.Length] = X` (that's UT2004+). Use `Arr.Insert(Arr.Length, 1); Arr[Arr.Length-1] = X;` — this bug bit twice (`Tracked`, `Records`).
-- **ACE HWID**: read the per-player `IACEv13.IACECheck` actor (`A.PlayerID == PRI.PlayerID` → `A.HWHash`). ACE validates asynchronously, so the first polls return "" — keep polling. The event-handler (`IACEEventHandler`) approach is a dead end on ACEv13p.
+- **ACE HWID**: read the per-player `IACEv14.IACECheck` actor (`A.PlayerID == PRI.PlayerID` → `A.HWHash`). ACE validates asynchronously, so the first polls return "" — keep polling. The event-handler (`IACEEventHandler`) approach is a dead end on ACEv13p/v14e. The IACE package name is baked into the compiled `.u` via the typed `class'IACEvNN.IACECheck'` literal — a future ACE major-version bump requires retargeting this literal (and `EditPackages`) or the whole package fails to load silently.
 - **UCC.exe quirks**: no ternary inside `$`-concatenation, no `Class.Package`, no `NotifyEndGame` on Mutator (poll `Level.Game.bGameEnded` from `Timer()`), ASCII-only string literals, `AddMutator` is a `Mutator` member not `GameInfo`.
 - **ServerActor registration**: the mod loads via `ServerActors=` (listed above Nexgen) and splices itself in as head BaseMutator in `PostBeginPlay` (the `?mutator=` list claims BaseMutator before ServerActors run, so prepend, don't append).
 
