@@ -36,23 +36,37 @@ function bool filterChat(Actor sender, string msg)
     local PlayerPawn PP;
     local NexgenClient c;
     local bool bNewEvent;
+    local string cmdMsg;
+    local string specPrefix;
 
     PP = PlayerPawn(sender);
     if (PP == None || Mut == None)
         return false;   // not a player line, or not wired up yet — allow
 
+    // Spectator chat arrives via MutatorBroadcastMessage with Nexgen's own
+    // "PlayerName:" prefix left intact (NexgenController.MutatorBroadcastMessage
+    // never strips it before calling plugins) — strip it the same way Nexgen
+    // itself detects a spec message, so !pm matches for spectators too.
+    cmdMsg = msg;
+    if (PP.IsA('Spectator') && PP.PlayerReplicationInfo != None)
+    {
+        specPrefix = PP.PlayerReplicationInfo.PlayerName $ ":";
+        if (Caps(Left(msg, Len(specPrefix))) == Caps(specPrefix))
+            cmdMsg = Mid(msg, Len(specPrefix));
+    }
+
     bNewEvent = !(sender == lastSender && msg == lastMsg
                   && (Level.TimeSeconds - lastTime) < 0.5);
 
     // Admin commands via chat prefix !pm — never broadcast to others.
-    if (Caps(Left(msg, 4)) == "!PM ")
+    if (Caps(Left(cmdMsg, 4)) == "!PM ")
     {
         if (bNewEvent)
         {
             lastSender = sender;  lastMsg = msg;  lastTime = Level.TimeSeconds;
             c = control.getClient(PP);
             if (c != None && c.hasRight(R_MODERATE))
-                Mut.ProcessCommand(Mid(msg, 4), PP);
+                Mut.ProcessCommand(Mid(cmdMsg, 4), PP);
             else
                 PP.ClientMessage("[PM] Moderator access required.");
         }
